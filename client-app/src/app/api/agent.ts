@@ -1,4 +1,4 @@
-import { Activity } from "./../models/activitiy";
+import { Activity } from "../models/activity";
 import axios, { AxiosResponse } from "axios";
 
 const sleep = (delay: number) => {
