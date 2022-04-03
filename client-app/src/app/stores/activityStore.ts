@@ -1,7 +1,7 @@
-import { Activity, ActivityFormValues } from "../models/activity";
 import { makeAutoObservable, runInAction } from "mobx";
-import { format } from "date-fns";
 import agent from "../api/agent";
+import { Activity, ActivityFormValues } from "../models/activity";
+import { format } from "date-fns";
 import { store } from "./store";
 import { Profile } from "../models/profile";
 
@@ -38,7 +38,6 @@ export default class ActivityStore {
     this.loadingInitial = true;
     try {
       const activities = await agent.Activities.list();
-
       activities.forEach((activity) => {
         this.setActivity(activity);
       });
@@ -94,7 +93,7 @@ export default class ActivityStore {
     this.loadingInitial = state;
   };
 
-  createActivity = async (activity: Activity) => {
+  createActivity = async (activity: ActivityFormValues) => {
     const user = store.userStore.user;
     const attendee = new Profile(user!);
     try {
@@ -144,6 +143,7 @@ export default class ActivityStore {
       });
     }
   };
+
   updateAttendance = async () => {
     const user = store.userStore.user;
     this.loading = true;
