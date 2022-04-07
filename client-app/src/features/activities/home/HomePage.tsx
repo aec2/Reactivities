@@ -50,9 +50,9 @@ export default observer(function HomePage() {
             >
               Register!
             </Button>
-            <Divider horizontal inverted>
+            {/* <Divider horizontal inverted>
               Or
-            </Divider>
+            </Divider> */}
             {/* <Button
               loading={userStore.fbLoading}
               size="huge"
