@@ -12,7 +12,7 @@ export default class UserStore {
     makeAutoObservable(this);
   }
 
-  get isLogggedIn() {
+  get isLoggedIn() {
     return !!this.user;
   }
 
