@@ -34,4 +34,4 @@ Come and visit the website --> https://reactivitiesaec.herokuapp.com/
  
 * Publishing the application to both IIS and Linux
  
-* Getting an ‘A’ rating for security from a well known security scanning site.
+* Getting an ‘A’ rating for security from a well known security scanning site. (i.e. https://securityheaders.com/)
