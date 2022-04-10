@@ -58,7 +58,7 @@ namespace API.Extensions
             // Whether the connection string came from the local development configuration file
             // or from the environment variable from Heroku, use it to set up your DbContext.
             options.UseNpgsql(connStr);
-            });
+        });
 
             services.AddCors(opt =>
             {
@@ -68,6 +68,7 @@ namespace API.Extensions
                     .AllowAnyMethod()
                     .AllowAnyHeader()
                     .AllowCredentials()
+                    .WithExposedHeaders("WWW-Authenticate", "Pagination")
                     .WithOrigins("http://localhost:3000");
                 });
             });

@@ -1,4 +1,3 @@
-import { Activity } from "./../models/activity";
 import {
   HubConnection,
   HubConnectionBuilder,
