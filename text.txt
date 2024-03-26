@@ -1,36 +1,38 @@
 import os
 from collections import defaultdict
 
-# Paths to the three directories you want to search
+# Define the paths to the three directories you want to search
 directories = [
     'C:/path/to/first/directory',
     'C:/path/to/second/directory',
     'C:/path/to/third/directory'
 ]
 
-# Verify all directories exist
+# Make sure all specified directories exist
 for directory in directories:
     if not os.path.exists(directory) or not os.path.isdir(directory):
         print(f"Directory does not exist or is not a directory: {directory}")
         exit(1)
 
-# This dictionary will hold the files found in each directory
-# The key will be the file name, and the value will be a set of directories where the file is found
+# This dictionary holds the filenames and the directories where they were found
 files_found = defaultdict(set)
 
-# Walk through each directory and record the files found
+# Walk through each directory and its subdirectories
 for directory in directories:
     for root, dirs, files in os.walk(directory):
         for file in files:
-            files_found[file].add(root)
+            # Add the directory path to the set corresponding to the file name
+            files_found[file].add(directory)
 
-# Filter files found in all three directories
-files_in_all_directories = [file for file, dirs in files_found.items() if len(dirs) == len(directories)]
+# Attempt to find a file present in all specified directories or their subdirectories
+file_in_all_directories = None
+for file, dirs in files_found.items():
+    if len(dirs) == len(directories):
+        file_in_all_directories = file
+        break  # Found a file that exists in all directories, exit the loop
 
-# Print the results
-if files_in_all_directories:
-    print("Files found in all three directories:")
-    for file in files_in_all_directories:
-        print(file)
+# Output the result
+if file_in_all_directories:
+    print(f"Found a file in all three directories: {file_in_all_directories}")
 else:
     print("No files are common across all three directories.")
