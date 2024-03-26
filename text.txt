@@ -1,0 +1,21 @@
+import os
+from collections import defaultdict
+
+# Path to the directory you want to search
+directory_path = 'C:/path/to/your/directory'
+
+# This dictionary will hold the count of each file (name + extension)
+files_count = defaultdict(int)
+
+# Walking through the directory and its subdirectories
+for root, dirs, files in os.walk(directory_path):
+    for file in files:
+        # Incrementing the count for each file found
+        files_count[file] += 1
+
+# Filtering files that exist more than twice
+files_more_than_twice = {file: count for file, count in files_count.items() if count > 2}
+
+# Printing the files and their counts
+for file, count in files_more_than_twice.items():
+    print(f"{file}: {count} times")
