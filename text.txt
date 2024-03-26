@@ -1,21 +1,36 @@
 import os
 from collections import defaultdict
 
-# Path to the directory you want to search
-directory_path = 'C:/path/to/your/directory'
+# Paths to the three directories you want to search
+directories = [
+    'C:/path/to/first/directory',
+    'C:/path/to/second/directory',
+    'C:/path/to/third/directory'
+]
 
-# This dictionary will hold the count of each file (name + extension)
-files_count = defaultdict(int)
+# Verify all directories exist
+for directory in directories:
+    if not os.path.exists(directory) or not os.path.isdir(directory):
+        print(f"Directory does not exist or is not a directory: {directory}")
+        exit(1)
 
-# Walking through the directory and its subdirectories
-for root, dirs, files in os.walk(directory_path):
-    for file in files:
-        # Incrementing the count for each file found
-        files_count[file] += 1
+# This dictionary will hold the files found in each directory
+# The key will be the file name, and the value will be a set of directories where the file is found
+files_found = defaultdict(set)
 
-# Filtering files that exist more than twice
-files_more_than_twice = {file: count for file, count in files_count.items() if count > 2}
+# Walk through each directory and record the files found
+for directory in directories:
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            files_found[file].add(root)
 
-# Printing the files and their counts
-for file, count in files_more_than_twice.items():
-    print(f"{file}: {count} times")
+# Filter files found in all three directories
+files_in_all_directories = [file for file, dirs in files_found.items() if len(dirs) == len(directories)]
+
+# Print the results
+if files_in_all_directories:
+    print("Files found in all three directories:")
+    for file in files_in_all_directories:
+        print(file)
+else:
+    print("No files are common across all three directories.")
