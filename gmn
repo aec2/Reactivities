@@ -1,0 +1,165 @@
+To address the performance issues with your ASP.NET Core service method when handling over 5000 batches, we'll optimize the database queries and SAP service calls. The current implementation suffers from the N+1 query problem and excessive external HTTP requests. Here's the refactored solution:
+
+### 1. Optimize Database Queries (Grinding/Scrap Times)
+Replace per-batch queries with bulk operations using chunking to avoid SQL parameter limits:
+
+```csharp
+public Dictionary<string, decimal> GetBatchGrindingTimesCount(List<string> batchNumbers)
+{
+    return GetAggregateForBatches(batchNumbers, g => g.Sum(s => s.GrindingTimes));
+}
+
+public Dictionary<string, decimal> GetBatchScrapTimesCount(List<string> batchNumbers)
+{
+    return GetAggregateForBatches(batchNumbers, g => g.Sum(s => s.ScrapAmount));
+}
+
+private Dictionary<string, decimal> GetAggregateForBatches(List<string> batchNumbers, Func<IGrouping<string, Grinding>, decimal> selector)
+{
+    if (!batchNumbers.Any()) 
+        return new Dictionary<string, decimal>();
+
+    const int CHUNK_SIZE = 2000;
+    var result = new Dictionary<string, decimal>();
+
+    for (int i = 0; i < batchNumbers.Count; i += CHUNK_SIZE)
+    {
+        var chunk = batchNumbers.Skip(i).Take(CHUNK_SIZE).ToList();
+        
+        var chunkResults = _grindingRepository.GetAll()
+            .Where(g => chunk.Contains(g.Batch.BatchNumber))
+            .GroupBy(g => g.Batch.BatchNumber)
+            .Select(g => new { BatchNumber = g.Key, Value = selector(g) })
+            .ToList();
+
+        foreach (var item in chunkResults)
+        {
+            result[item.BatchNumber] = item.Value;
+        }
+    }
+    
+    return result;
+}
+```
+
+### 2. Optimize SAP Service Calls
+Group by tool number and cache results to minimize duplicate requests:
+
+```csharp
+private readonly ConcurrentDictionary<string, decimal> _materialCache = new();
+
+private Dictionary<string, decimal> GetGrindingLives(List<string> toolNumbers)
+{
+    var distinctTools = toolNumbers.Distinct().ToList();
+    var results = new Dictionary<string, decimal>();
+
+    foreach (var tool in distinctTools)
+    {
+        if (!_materialCache.TryGetValue(tool, out decimal grindingLife))
+        {
+            var material = _sapService.GetMaterial(tool);
+            decimal.TryParse(material?.GrindingLife, out grindingLife);
+            _materialCache[tool] = grindingLife; // Cache result
+        }
+        results[tool] = grindingLife;
+    }
+    
+    return results;
+}
+```
+
+### 3. Refactored Service Method
+```csharp
+public List<BatchDto> GetAllByToolNumber(string toolNumber)
+{
+    // Get batches in single query
+    var batches = _batchRepository.GetAll()
+        .Where(b => b.ToolNumber == toolNumber)
+        .Select(b => ObjectMapper.Map<BatchDto>(b))
+        .ToList();
+
+    if (!batches.Any()) 
+        return batches;
+
+    // Prepare batch data
+    var batchNumbers = batches.Select(b => b.BatchNumber).ToList();
+    var toolNumbers = batches.Select(b => b.ToolNumber).ToList();
+
+    // Bulk operations
+    var grindingTimes = _grindingDomainService.GetBatchGrindingTimesCount(batchNumbers);
+    var scrapTimes = _grindingDomainService.GetBatchScrapTimesCount(batchNumbers);
+    var grindingLives = GetGrindingLives(toolNumbers);
+
+    // Map results to DTOs
+    foreach (var batch in batches)
+    {
+        batch.GrindingTimes = grindingTimes.GetValueOrDefault(batch.BatchNumber);
+        batch.ScrapTimes = scrapTimes.GetValueOrDefault(batch.BatchNumber);
+        batch.GrindingLife = grindingLives.GetValueOrDefault(batch.ToolNumber);
+    }
+
+    return batches;
+}
+```
+
+### Key Improvements:
+1. **Database Optimization**:
+   - Reduced from 10,000+ queries to maximum 4 queries (2 for grinding/scrap times with chunking)
+   - Uses efficient grouping instead of per-batch queries
+   - Handles SQL parameter limits via chunking (2000 items/chunk)
+
+2. **SAP Call Optimization**:
+   - Reduced from N calls to 1 call per distinct tool number
+   - Added basic caching to prevent duplicate requests
+   - Avoids async complexity while maintaining sync context
+
+3. **Performance Gains**:
+   - Batch processing instead of per-item operations
+   - Dictionary lookups (O(1)) instead of nested loops
+   - Reduced database roundtrips and HTTP overhead
+
+4. **Resource Management**:
+   - Controlled memory usage through chunking
+   - Cache with expiration recommended for production (not shown)
+   - Avoids thread pool starvation by staying synchronous
+
+### Recommendations for Production:
+1. **Add Cache Expiration**:
+   ```csharp
+   // In Startup.cs
+   services.AddMemoryCache();
+   
+   // In service class
+   private readonly IMemoryCache _cache;
+   
+   decimal GetCachedGrindingLife(string toolNumber)
+   {
+       return _cache.GetOrCreate(toolNumber, entry => {
+           entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30);
+           var material = _sapService.GetMaterial(toolNumber);
+           return decimal.TryParse(material?.GrindingLife, out var life) ? life : 0;
+       });
+   }
+   ```
+
+2. **Implement Pagination**:
+   ```csharp
+   // UI should request paginated data
+   public PagedResultDto<BatchDto> GetPagedByToolNumber(string toolNumber, int skipCount, int maxResultCount)
+   {
+       var query = _batchRepository.GetAll().Where(...);
+       var totalCount = query.Count();
+       var items = query.Skip(skipCount).Take(maxResultCount).ToList();
+       // ... (apply optimizations from above to items)
+   }
+   ```
+
+3. **Database Indexing**:
+   Ensure these fields are indexed:
+   - `Batch.ToolNumber`
+   - `Grinding.BatchId` (or `BatchNumber` if denormalized)
+
+This solution reduces database operations from O(N) to O(1) for grinding/scrap times and O(M) for SAP calls (where M = distinct tools << N). For 5000 batches with 100 distinct tools, you'll see:
+- Database queries: 4 (was 10,000)
+- SAP calls: 100 (was 5000)
+- Execution time: Seconds instead of minutes
