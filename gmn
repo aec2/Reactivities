@@ -1,3 +1,5 @@
+dpsk
+
 To address the performance issues with your ASP.NET Core service method when handling over 5000 batches, we'll optimize the database queries and SAP service calls. The current implementation suffers from the N+1 query problem and excessive external HTTP requests. Here's the refactored solution:
 
 ### 1. Optimize Database Queries (Grinding/Scrap Times)
