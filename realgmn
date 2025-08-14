@@ -1,0 +1,133 @@
+Of course. The performance issue you're facing is a classic N+1 problem. For every batch returned from the initial database query (the "1"), you are making at least three additional calls (two to the database and one to the SAP service) inside your loop (the "+N"). With 5,000 batches, this results in over 15,000 separate I/O operations, which is why your UI is struggling.
+​The solution is to batch your operations. Instead of fetching details one-by-one inside the loop, you should fetch all the necessary data in a few bulk operations before the loop.
+​Here is a step-by-step guide and the refactored code to resolve this.
+​1. The Core Problem: Analyzing the Inefficiency
+​Let's break down the current number of calls for 5,000 batches:
+​Initial Query: 1 call to get all batches for the toolNumber.
+​Inside the Loop (x 5,000):
+​GetBatchScrapTimesCount: 1 database query.
+​GetBatchGrindingTimesCount: 1 database query.
+​_sapService.GetMaterial: 1 external HTTP request to SAP.
+​Total for 5,000 batches: 1 + (5000 * 2) database queries + 5000 HTTP requests = 10,001 DB queries and 5000 API calls. This is extremely inefficient.
+​A major insight here is that the SAP call _sapService.GetMaterial(batchDto.ToolNumber) uses the same toolNumber for every single batch in the list. You are making 5,000 identical API calls when only one is needed.
+​2. The Refactored Solution: Batching Queries 🚀
+​We'll modify the logic to perform these steps:
+​Fetch all base BatchDto objects.
+​Make a single API call to SAP to get the GrindingLife since it's the same for all batches.
+​Collect all BatchNumbers.
+​Perform a single database query that gets the SUM of GrindingTimes and ScrapAmount for all collected batch numbers, grouped by the batch number.
+​Map the results back to the DTOs in memory.
+​Here is the refactored, high-performance version of your code. This version is also made async which is a best practice for I/O-bound operations in ASP.NET Core.
+
+// Make the service method asynchronous
+public async Task<List<BatchDto>> GetAllByToolNumberAsync(string toolNumber)
+{
+    // 1. Get all base batch data from the DB
+    var batches = await _batchRepository.GetAll()
+        .Where(y => y.ToolNumber == toolNumber)
+        .Select(x => ObjectMapper.Map<BatchDto>(x))
+        .ToListAsync(); // Use Async version if your provider supports it
+
+    if (!batches.Any())
+    {
+        return new List<BatchDto>();
+    }
+
+    // 2. CRITICAL OPTIMIZATION: Get GrindingLife ONCE from SAP
+    // The ToolNumber is the same for all batches in this query.
+    decimal grindingLife = 0;
+    var material = await _sapService.GetMaterialAsync(toolNumber); // Assuming an async version exists
+    if (material != null)
+    {
+        decimal.TryParse(material.GrindingLife, out grindingLife);
+    }
+
+    // 3. Get all batch numbers to use in a single DB query
+    var batchNumbers = batches.Select(b => b.BatchNumber).ToList();
+
+    // 4. Get all grinding and scrap data in a SINGLE database query using GROUP BY
+    var grindingData = await _grindingRepository.GetAllIncluding(i => i.Batch)
+        .Where(g => batchNumbers.Contains(g.Batch.BatchNumber))
+        .GroupBy(g => g.Batch.BatchNumber)
+        .Select(group => new
+        {
+            BatchNumber = group.Key,
+            TotalGrindingTimes = group.Sum(s => s.GrindingTimes),
+            TotalScrapAmount = group.Sum(s => s.ScrapAmount)
+        })
+        .ToDictionaryAsync(k => k.BatchNumber); // Materialize into a dictionary for fast lookups
+
+    // 5. Map the aggregated data back to the DTOs in memory (very fast)
+    foreach (var batchDto in batches)
+    {
+        // Set GrindingLife from the single value fetched earlier
+        batchDto.GrindingLife = grindingLife;
+
+        // Look up the grinding/scrap data from the dictionary
+        if (grindingData.TryGetValue(batchDto.BatchNumber, out var data))
+        {
+            batchDto.GrindingTimes = data.TotalGrindingTimes;
+            batchDto.ScrapTimes = data.TotalScrapAmount;
+        }
+        else
+        {
+            // Set defaults if a batch has no grinding records
+            batchDto.GrindingTimes = 0;
+            batchDto.ScrapTimes = 0;
+        }
+    }
+
+    return batches;
+}
+You would also need to create async versions of your repository and service calls (e.g., GetMaterialAsync), which is standard practice in modern .NET.
+​3. Further Recommendations for a Robust UI
+​Even with a fast API, returning 5,000+ records to an Angular UI is not ideal and can cause the browser to freeze while rendering.
+​Implement Pagination
+​The best solution is to not send all the data at once. Modify your service to accept paging parameters and change your repository query to only fetch one "page" of data at a time.
+​Example Service Method with Pagination:// Method signature now accepts page number and page size
+public async Task<PagedResultDto<BatchDto>> GetAllByToolNumberPagedAsync(string toolNumber, int pageNumber, int pageSize)
+{
+    // First, get the total count for the UI Pager
+    var totalCount = await _batchRepository.CountAsync(y => y.ToolNumber == toolNumber);
+
+    // Fetch only the data for the current page
+    var batches = await _batchRepository.GetAll()
+        .Where(y => y.ToolNumber == toolNumber)
+        .OrderBy(b => b.CreationTime) // Always have a consistent order for paging
+        .Skip((pageNumber - 1) * pageSize)
+        .Take(pageSize)
+        .Select(x => ObjectMapper.Map<BatchDto>(x))
+        .ToListAsync();
+
+    // ... apply the same batching logic as above for the paged results ...
+    // (Get GrindingLife, get grinding data for the page, map results)
+    
+    // The ABP Framework has a PagedResultDto you can use
+    return new PagedResultDto<BatchDto>(totalCount, batches);
+
+
+Your Angular UI would then request data page by page (e.g., page 1 with 50 items), providing a much smoother user experience.
+​Caching
+​The GrindingLife from SAP for a given toolNumber probably doesn't change very often. You can cache this result to avoid even the single API call on subsequent requests.
+
+private readonly IMemoryCache _cache;
+
+// ... in your service constructor, inject IMemoryCache
+
+public async Task<Material> GetMaterialAsync(string materialNumber)
+{
+    // Use the cache to store and retrieve material data
+    string cacheKey = $"Material_{materialNumber}";
+    if (!_cache.TryGetValue(cacheKey, out Material material))
+    {
+        material = await _baseSapService.ExecuteRequestAsync<Material>($"Materials/{materialNumber}", Method.Get);
+        if (material != null)
+        {
+            // Cache the result for 1 hour
+            _cache.Set(cacheKey, material, TimeSpan.FromHours(1));
+        }
+    }
+    return material;
+}
+
+}
