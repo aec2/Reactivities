@@ -1,38 +1,31 @@
-import os
-from collections import defaultdict
+// index.js
+const { app, BrowserWindow } = require('electron');
+const path = require('path');
 
-# Define the paths to the three directories you want to search
-directories = [
-    'C:/path/to/first/directory',
-    'C:/path/to/second/directory',
-    'C:/path/to/third/directory'
-]
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 520,
+    height: 420,
+    minWidth: 480,
+    minHeight: 380,
+    backgroundColor: '#0f1221',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: false, // simple setup since all logic is in index.html
+      nodeIntegration: true
+    }
+  });
 
-# Make sure all specified directories exist
-for directory in directories:
-    if not os.path.exists(directory) or not os.path.isdir(directory):
-        print(f"Directory does not exist or is not a directory: {directory}")
-        exit(1)
+  win.loadFile(path.join(__dirname, 'index.html'));
+}
 
-# This dictionary holds the filenames and the directories where they were found
-files_found = defaultdict(set)
+app.whenReady().then(createWindow);
 
-# Walk through each directory and its subdirectories
-for directory in directories:
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            # Add the directory path to the set corresponding to the file name
-            files_found[file].add(directory)
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
 
-# Attempt to find a file present in all specified directories or their subdirectories
-file_in_all_directories = None
-for file, dirs in files_found.items():
-    if len(dirs) == len(directories):
-        file_in_all_directories = file
-        break  # Found a file that exists in all directories, exit the loop
-
-# Output the result
-if file_in_all_directories:
-    print(f"Found a file in all three directories: {file_in_all_directories}")
-else:
-    print("No files are common across all three directories.")
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
