@@ -1,186 +1,124 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta
-  name="viewport"
-  content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
-/>
-<title>My Leave Time</title>
-<style>
-  :root{
-    --bg:#0f1221;
-    --card:#161a2f;
-    --accent:#7aa2ff;
-    --muted:#9aa4b2;
-    --text:#e9edf3;
-    --danger:#ff8a8a;
-    --shadow: 0 20px 40px rgba(0,0,0,.35);
-    --radius:18px;
-  }
-  html,body{height:100%}
-  body{
-    margin:0;
-    background: radial-gradient(1200px 600px at 50% -20%, #20264b 0%, var(--bg) 60%);
-    color:var(--text);
-    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-    display:flex; align-items:center; justify-content:center;
-  }
-  .card{
-    width:min(92vw,680px);
-    background:var(--card);
-    border-radius:var(--radius);
-    box-shadow:var(--shadow);
-    padding:28px 28px 20px;
-  }
-  .title{
-    font-size:22px; font-weight:700; letter-spacing:.2px;
-    display:flex; align-items:center; gap:10px; color:#fff;
-  }
-  .title .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 18px var(--accent)}
-  .row{display:flex; gap:18px; margin-top:18px; flex-wrap:wrap}
-  .field{
-    flex:1 1 220px; background:#0e1224; border:1px solid #252b49;
-    border-radius:12px; padding:14px 16px;
-  }
-  label{display:block; font-size:12px; color:var(--muted); margin-bottom:8px; letter-spacing:.2px}
-  input[type="time"]{
-    width:100%; font-size:18px; padding:10px 12px; color:#fff;
-    background:#111633; border:1px solid #2b3157; border-radius:10px; outline:none;
-  }
-  input[type="time"]:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(122,162,255,.2)}
-  .helper{font-size:12px; color:var(--muted); margin-top:6px}
-  .warn{color:var(--danger)}
-  .big{
-    margin-top:22px;
-    background:linear-gradient(180deg,#0d1125,#0a0e1e);
-    border:1px solid #23294b;
-    border-radius:16px;
-    padding:26px 22px;
-    display:flex; align-items:center; justify-content:space-between; gap:12px;
-  }
-  .big .label{color:var(--muted); font-size:13px; letter-spacing:.3px}
-  .big .time{
-    font-variant-numeric: tabular-nums;
-    font-size:56px; font-weight:800; letter-spacing:1px; color:#fff;
-  }
-  .sub{
-    display:flex; justify-content:space-between; margin-top:8px; color:var(--muted); font-size:13px;
-  }
-  .pill{
-    padding:6px 10px; border-radius:999px; background:#0f1430; border:1px solid #2a2f56; color:#c6cce4; font-size:12px;
-  }
-  .footer{
-    margin-top:16px; display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;
-  }
-  .btn{
-    border:1px solid #2b3157; background:#12173a; color:#dfe7ff;
-    padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:600;
-  }
-  .btn:hover{border-color:var(--accent)}
-</style>
-</head>
-<body>
-  <main class="card">
-    <div class="title"><span class="dot"></span> My Leave Time</div>
+// index.js
+const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, Notification } = require('electron');
+const path = require('path');
 
-    <div class="row">
-      <div class="field">
-        <label for="start">Start time (flex: 07:30–09:30)</label>
-        <input id="start" type="time" min="07:30" max="09:30" step="300" />
-        <div id="rangeHelp" class="helper">Pick any time between 07:30 and 09:30.</div>
-      </div>
-    </div>
+let win;
+let tray; // keep a reference or it will be GC’d
 
-    <section class="big">
-      <div>
-        <div class="label">Calculated leave time</div>
-        <div id="leaveTime" class="time">—:—</div>
-      </div>
-      <div>
-        <div class="label">Selected start</div>
-        <div id="startEcho" class="pill">—:—</div>
-      </div>
-    </section>
-
-    <div class="sub">
-      <div class="pill">8h work + 45m break = add 9h 45m</div>
-      <div id="exampleEcho" class="helper">Example: 08:00 → 17:45</div>
-    </div>
-
-    <div class="footer">
-      <button class="btn" id="nowBtn">Use current time (clamped)</button>
-      <button class="btn" id="defaultsBtn">Set to 08:00</button>
-    </div>
-  </main>
-
-<script>
-  // ----- Constants -----
-  const FLEX_MIN = toMinutes('07:30');
-  const FLEX_MAX = toMinutes('09:30');
-  const ADD_MINUTES = 9 * 60 + 45; // 9h45m total to add
-
-  // ----- Elements -----
-  const startInput = document.getElementById('start');
-  const leaveTimeEl = document.getElementById('leaveTime');
-  const startEchoEl = document.getElementById('startEcho');
-  const rangeHelpEl = document.getElementById('rangeHelp');
-  const nowBtn = document.getElementById('nowBtn');
-  const defaultsBtn = document.getElementById('defaultsBtn');
-
-  // ----- Helpers -----
-  function toMinutes(hhmm) {
-    const [h, m] = hhmm.split(':').map(Number);
-    return h * 60 + m;
-  }
-  function fromMinutes(total) {
-    total = ((total % (24*60)) + (24*60)) % (24*60); // normalize 0..1439
-    const h = Math.floor(total / 60);
-    const m = total % 60;
-    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-  }
-  function clamp(val, min, max) {
-    return Math.min(Math.max(val, min), max);
-  }
-  function update() {
-    const val = startInput.value || '08:00';
-    let startMin = toMinutes(val);
-    const inRange = (startMin >= FLEX_MIN && startMin <= FLEX_MAX);
-    if (!inRange) {
-      rangeHelpEl.textContent = 'Out of range — clamping to the nearest allowed time (07:30–09:30).';
-      rangeHelpEl.classList.add('warn');
-    } else {
-      rangeHelpEl.textContent = 'Pick any time between 07:30 and 09:30.';
-      rangeHelpEl.classList.remove('warn');
+// ---- Helper: single instance (recommended for tray apps)
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
     }
+  });
+}
 
-    startMin = clamp(startMin, FLEX_MIN, FLEX_MAX);
-    const leaveMin = startMin + ADD_MINUTES;
+function createWindow() {
+  win = new BrowserWindow({
+    width: 520,
+    height: 420,
+    minWidth: 480,
+    minHeight: 380,
+    backgroundColor: '#0f1221',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    autoHideMenuBar: true,
+    webPreferences: {
+      // Simple setup since logic lives in index.html
+      contextIsolation: false,
+      nodeIntegration: true
+    }
+  });
 
-    startEchoEl.textContent = fromMinutes(startMin);
-    leaveTimeEl.textContent = fromMinutes(leaveMin);
+  win.loadFile(path.join(__dirname, 'index.html'));
+
+  // Close to tray instead of quitting
+  win.on('close', (e) => {
+    if (!app.isQuiting) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
+}
+
+function createTray() {
+  // Provide your own icon at /assets/tray.png (16x16 or 24x24).
+  // On macOS you typically use a monochrome template icon.
+  const iconPath = path.join(__dirname, 'assets', process.platform === 'darwin' ? 'trayTemplate.png' : 'tray.png');
+
+  let image;
+  try {
+    image = nativeImage.createFromPath(iconPath);
+  } catch {
+    image = nativeImage.createEmpty();
   }
 
-  function useCurrentTimeClamped() {
-    const now = new Date();
-    const cur = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    // Set then immediately update (the update call clamps to flex range)
-    startInput.value = cur;
-    update();
+  tray = new Tray(image);
+  tray.setToolTip('My Leave Time');
+
+  const contextMenu = Menu.buildFromTemplate([
+    { label: 'Show/Hide', click: toggleWindow },
+    { type: 'separator' },
+    { label: 'Use current time (clamped)', click: () => win?.webContents.send('tray:use-now') },
+    { label: 'Set to 08:00', click: () => win?.webContents.send('tray:set-0800') },
+    { type: 'separator' },
+    { label: 'Quit', click: () => { app.isQuiting = true; app.quit(); } }
+  ]);
+  tray.setContextMenu(contextMenu);
+
+  // Left click toggles window (Windows/Linux). On macOS, left-click shows window.
+  tray.on('click', toggleWindow);
+  tray.on('double-click', toggleWindow);
+}
+
+function toggleWindow() {
+  if (!win) return;
+  if (win.isVisible()) {
+    win.hide();
+  } else {
+    win.show();
+    win.focus();
   }
+}
 
-  // ----- Init -----
-  // Default to 08:00 for a nice middle case
-  startInput.value = '08:00';
-  update();
+// Receive updates from the renderer to show in the tray tooltip/title
+ipcMain.on('update-leave-time', (_evt, payload) => {
+  const { start, leave } = payload || {};
+  if (tray && start && leave) {
+    // Tooltip works everywhere
+    tray.setToolTip(`Start: ${start}  →  Leave: ${leave}`);
 
-  // ----- Events -----
-  startInput.addEventListener('input', update);
-  nowBtn.addEventListener('click', useCurrentTimeClamped);
-  defaultsBtn.addEventListener('click', () => { startInput.value = '08:00'; update(); });
+    // macOS supports setTitle (text next to tray icon). On Linux some DEs show it, Windows generally ignores it.
+    try { tray.setTitle?.(` ${leave}`); } catch {}
+    
+    // Optional: brief notification on change (Windows/macOS). Commented out by default.
+    // if (Notification.isSupported()) {
+    //   new Notification({ title: 'Leave time updated', body: `${start} → ${leave}` }).show();
+    // }
 
-  // Quick examples (not interactive):
-  document.getElementById('exampleEcho').textContent = 'Examples: 07:30 → 17:15, 08:00 → 17:45, 09:30 → 19:15';
-</script>
-</body>
-</html>
+    // Windows-only balloon (legacy tray balloons)
+    // try { tray.displayBalloon?.({ title: 'Leave time', content: `${start} → ${leave}` }); } catch {}
+  }
+});
+
+app.whenReady().then(() => {
+  createWindow();
+  createTray();
+});
+
+app.on('window-all-closed', () => {
+  // Keep app running in tray on Windows/Linux; on macOS you also typically keep it.
+  if (process.platform !== 'darwin') {
+    // do not quit, we want tray to live; but Electron quits if no windows and no tray refs.
+    // We have a tray ref, so it's fine to do nothing here.
+  }
+});
+
+app.on('activate', () => {
+  if (!BrowserWindow.getAllWindows().length) createWindow();
+});
